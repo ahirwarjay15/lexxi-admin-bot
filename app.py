@@ -116,8 +116,10 @@ def send_or_update_force_join(chat_id, user_id, deep_link, message_id=None):
 
 def deliver_file(chat_id, deep_link):
     res = supabase.table("apps").select("*").eq("deep_link_code", deep_link).eq("active", True).execute()
+    error_msg = get_setting("error_feedback_text", "File access karne me samasya aayi.")
+    
     if not res.data:
-        send_tg_request("sendMessage", {"chat_id": chat_id, "text": "File not found or inactive."})
+        send_tg_request("sendMessage", {"chat_id": chat_id, "text": error_msg})
         return
 
     app_data = res.data[0]
@@ -129,7 +131,7 @@ def deliver_file(chat_id, deep_link):
     })
 
     if not fwd_res.get("ok"):
-        send_tg_request("sendMessage", {"chat_id": chat_id, "text": "File access karne me samasya aayi."})
+        send_tg_request("sendMessage", {"chat_id": chat_id, "text": error_msg})
         return
 
     pwd = app_data.get("password")
@@ -212,19 +214,23 @@ def webhook():
                 ADMIN_SESSIONS[user_id] = {"step": "BROADCAST"}
                 send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Wo message bhejo jo sabhi users ko bhejna hai:"})
             elif cb_data == "adm_settings":
+                welcome_txt = get_setting("welcome_text", "Welcome to the Bot! Send a valid link to download your file.")
+                err_txt = get_setting("error_feedback_text", "File access karne me samasya aayi.")
                 fj_text = get_setting("force_join_text", "Not Set")
                 btn_text = get_setting("verify_button_text", "✅ VERIFY")
                 poster = get_setting("force_join_poster", "Not Set")
                 text = (
                     "⚙️ **Bot Messages & Settings**\n\n"
+                    f"**👋 Welcome Message:**\n`{welcome_txt}`\n\n"
+                    f"**⚠️ Error/Feedback Text:**\n`{err_txt}`\n\n"
                     f"**Force Join Caption:**\n`{fj_text}`\n\n"
                     f"**Verify Button:** `{btn_text}`\n"
                     f"**Poster URL:** `{poster}`\n\n"
                     "Neeche diye gaye buttons se edit karein:"
                 )
                 keyboard = [
-                    [{"text": "📝 Edit Caption", "callback_data": "set_msg_fj_text"}],
-                    [{"text": "🔘 Edit Verify Button", "callback_data": "set_msg_verify_btn"}],
+                    [{"text": "👋 Edit Welcome Msg", "callback_data": "set_msg_welcome"}, {"text": "⚠️ Edit Error Msg", "callback_data": "set_msg_error"}],
+                    [{"text": "📝 Edit FJ Caption", "callback_data": "set_msg_fj_text"}, {"text": "🔘 Edit Verify Button", "callback_data": "set_msg_verify_btn"}],
                     [{"text": "🖼️ Edit Poster Link", "callback_data": "set_msg_poster"}],
                     [{"text": "⬅️ Back", "callback_data": "adm_main"}]
                 ]
@@ -234,6 +240,12 @@ def webhook():
                     "parse_mode": "Markdown",
                     "reply_markup": {"inline_keyboard": keyboard}
                 })
+            elif cb_data == "set_msg_welcome":
+                ADMIN_SESSIONS[user_id] = {"step": "SET_WELCOME_MSG"}
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Naya Welcome message bhejo (jo simple `/start` dabane par aayega):"})
+            elif cb_data == "set_msg_error":
+                ADMIN_SESSIONS[user_id] = {"step": "SET_ERROR_MSG"}
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Naya Error/Feedback message bhejo (jo file na milne par aayega):"})
             elif cb_data == "set_msg_fj_text":
                 ADMIN_SESSIONS[user_id] = {"step": "SET_FJ_TEXT"}
                 send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Naya Force Join message/caption bhejo:"})
@@ -343,6 +355,20 @@ def webhook():
                 send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"📢 Broadcast complete. Sent to {sent} users."})
                 return "OK", 200
 
+            elif step == "SET_WELCOME_MSG":
+                set_setting("welcome_text", text)
+                ADMIN_SESSIONS.pop(user_id, None)
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Welcome message update ho gaya!"})
+                show_admin_panel(chat_id)
+                return "OK", 200
+
+            elif step == "SET_ERROR_MSG":
+                set_setting("error_feedback_text", text)
+                ADMIN_SESSIONS.pop(user_id, None)
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Error/Feedback message update ho gaya!"})
+                show_admin_panel(chat_id)
+                return "OK", 200
+
             elif step == "SET_FJ_TEXT":
                 set_setting("force_join_text", text)
                 ADMIN_SESSIONS.pop(user_id, None)
@@ -374,7 +400,7 @@ def webhook():
                 if all_joined:
                     deliver_file(chat_id, deep_link)
             else:
-                welcome_msg = get_setting("welcome_text", "Welcome! Open a valid file link to download.")
+                welcome_msg = get_setting("welcome_text", "Welcome to the Bot! Send a valid link to download your file.")
                 send_tg_request("sendMessage", {"chat_id": chat_id, "text": welcome_msg})
             return "OK", 200
 
@@ -382,4 +408,3 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-                
