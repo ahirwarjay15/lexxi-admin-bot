@@ -227,7 +227,7 @@ def webhook():
         elif cb_data == "set_msg_verify_btn":
             ADMIN_SESSIONS[user_id] = {"step": "SET_VERIFY_BTN"}
             send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Naya Verify Button text bhejo:"})
-        elif cb_data == "set_msg_poster":
+     Handle   elif cb_data == "set_msg_poster":
             ADMIN_SESSIONS[user_id] = {"step": "SET_POSTER"}
             send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Poster image ka direct URL bhejo (ya empty karne ke liye `none` bhejo):"})
             
@@ -242,7 +242,16 @@ def webhook():
         text = msg.get("text", "")
 
         # Save user to DB
-        supabase.table("users").upsert({"telegram_user_id": user_id, "username": username}).execute()
+        try:
+            supabase.table("users").upsert({"telegram_user_id": user_id, "username": username}).execute()
+        except Exception:
+            pass
+
+        # /admin Command (Reset Session + Open Panel)
+        if text and text.lower().strip() == "/admin" and user_id in ADMIN_IDS:
+            ADMIN_SESSIONS.pop(user_id, None)
+            show_admin_panel(chat_id)
+            return "OK", 200
 
         # Admin step-by-step inputs
         if user_id in ADMIN_IDS and user_id in ADMIN_SESSIONS:
@@ -264,7 +273,7 @@ def webhook():
             elif step == "APP_FILE":
                 fwd_mid = msg.get("forward_from_message_id")
                 if not fwd_mid:
-                    send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Kripya Storage channel se seedha forward karein taaki storage message ID mil sake."})
+                    send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Kripya Storage channel se seedha forward karein."})
                     return "OK", 200
                 sess["storage_id"] = fwd_mid
                 sess["step"] = "APP_PASS"
@@ -273,7 +282,6 @@ def webhook():
 
             elif step == "APP_PASS":
                 pwd = "" if text.strip().lower() == "none" else text.strip()
-                # Upsert to app DB
                 supabase.table("apps").upsert({
                     "title": sess["title"],
                     "deep_link_code": sess["code"],
@@ -282,9 +290,10 @@ def webhook():
                     "active": True
                 }, on_conflict="deep_link_code").execute()
                 ADMIN_SESSIONS.pop(user_id, None)
+                bot_user = "LexxiAdminBot"
                 send_tg_request("sendMessage", {
                     "chat_id": chat_id,
-                    "text": f"✅ **App Successfully Saved!**\n\nLink: `https://t.me/LexxiAdminBot?start={sess['code']}`",
+                    "text": f"✅ **App Successfully Saved!**\n\nLink: https://t.me/{bot_user}?start={sess['code']}",
                     "parse_mode": "Markdown"
                 })
                 return "OK", 200
@@ -306,7 +315,7 @@ def webhook():
                         }).eq("slot", slot).execute()
                         send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"✅ Slot {slot} updated!"})
                     else:
-                        send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Format galat tha. Kripya `Chat_ID | Name | URL` use karein."})
+                        send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Format galat tha. Kripya Chat_ID | Name | Link bhejein."})
                 ADMIN_SESSIONS.pop(user_id, None)
                 return "OK", 200
 
@@ -318,37 +327,32 @@ def webhook():
                     res = send_tg_request("sendMessage", {"chat_id": u["telegram_user_id"], "text": text})
                     if res.get("ok"):
                         sent += 1
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"📢 Broadcast complete: Sent to {sent} users."})
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"📢 Broadcast complete. Sent to {sent} users."})
                 return "OK", 200
-        elif step == "SET_FJ_TEXT":
-            set_setting("force_join_text", text)
-            ADMIN_SESSIONS.pop(user_id, None)
-            send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Caption update ho gaya!"})
-            show_admin_panel(chat_id)
-            return "OK", 200
 
-        elif step == "SET_VERIFY_BTN":
-            set_setting("verify_button_text", text)
-            ADMIN_SESSIONS.pop(user_id, None)
-            send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Button text update ho gaya!"})
-            show_admin_panel(chat_id)
-            return "OK", 200
+            elif step == "SET_FJ_TEXT":
+                set_setting("force_join_text", text)
+                ADMIN_SESSIONS.pop(user_id, None)
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Caption update ho gaya!"})
+                show_admin_panel(chat_id)
+                return "OK", 200
 
-        elif step == "SET_POSTER":
-            poster_val = "" if text.lower().strip() == "none" else text.strip()
-            set_setting("force_join_poster", poster_val)
-            ADMIN_SESSIONS.pop(user_id, None)
-            send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Poster link update ho gaya!"})
-            show_admin_panel(chat_id)
-            return "OK", 200
-            
-        # /admin Command
-        if text and text.lower().strip() == "/admin" and user_id in ADMIN_IDS:
-            ADMIN_SESSIONS.pop(user_id, None)
-            show_admin_panel(chat_id)
-            return "OK", 200
+            elif step == "SET_VERIFY_BTN":
+                set_setting("verify_button_text", text)
+                ADMIN_SESSIONS.pop(user_id, None)
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Button text update ho gaya!"})
+                show_admin_panel(chat_id)
+                return "OK", 200
 
-        # /start command with deep linking
+            elif step == "SET_POSTER":
+                poster_val = "" if text.lower().strip() == "none" else text.strip()
+                set_setting("force_join_poster", poster_val)
+                ADMIN_SESSIONS.pop(user_id, None)
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Poster link update ho gaya!"})
+                show_admin_panel(chat_id)
+                return "OK", 200
+
+        # /start command with deep-linking
         if text.startswith("/start"):
             args = text.split()
             if len(args) > 1:
@@ -365,4 +369,3 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-  
