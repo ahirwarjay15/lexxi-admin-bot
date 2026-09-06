@@ -197,7 +197,40 @@ def webhook():
             elif cb_data == "adm_broadcast":
                 ADMIN_SESSIONS[user_id] = {"step": "BROADCAST"}
                 send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Wo message bhejo jo sabhi users ko bhejna hai:"})
-
+        elif cb_data == "adm_settings":
+            fj_text = get_setting("force_join_text", "Not Set")
+            btn_text = get_setting("verify_button_text", "✅ VERIFY")
+            poster = get_setting("force_join_poster", "Not Set")
+            
+            text = (
+                "⚙️ **Bot Messages & Settings**\n\n"
+                f"**Force Join Caption:**\n`{fj_text}`\n\n"
+                f"**Verify Button:** `{btn_text}`\n"
+                f"**Poster URL:** `{poster}`\n\n"
+                "Neeche diye gaye buttons se edit karein:"
+            )
+            keyboard = [
+                [{"text": "📝 Edit Caption", "callback_data": "set_msg_fj_text"}],
+                [{"text": "🔘 Edit Verify Button", "callback_data": "set_msg_verify_btn"}],
+                [{"text": "🖼️ Edit Poster Link", "callback_data": "set_msg_poster"}],
+                [{"text": "⬅️ Back", "callback_data": "adm_main"}]
+            ]
+            send_tg_request("sendMessage", {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "Markdown",
+                "reply_markup": {"inline_keyboard": keyboard}
+            })
+        elif cb_data == "set_msg_fj_text":
+            ADMIN_SESSIONS[user_id] = {"step": "SET_FJ_TEXT"}
+            send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Naya Force Join message/caption bhejo:"})
+        elif cb_data == "set_msg_verify_btn":
+            ADMIN_SESSIONS[user_id] = {"step": "SET_VERIFY_BTN"}
+            send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Naya Verify Button text bhejo:"})
+        elif cb_data == "set_msg_poster":
+            ADMIN_SESSIONS[user_id] = {"step": "SET_POSTER"}
+            send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Poster image ka direct URL bhejo (ya empty karne ke liye `none` bhejo):"})
+            
         return "OK", 200
 
     # Handle Normal Messages
@@ -287,9 +320,31 @@ def webhook():
                         sent += 1
                 send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"📢 Broadcast complete: Sent to {sent} users."})
                 return "OK", 200
+        elif step == "SET_FJ_TEXT":
+            set_setting("force_join_text", text)
+            ADMIN_SESSIONS.pop(user_id, None)
+            send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Caption update ho gaya!"})
+            show_admin_panel(chat_id)
+            return "OK", 200
 
+        elif step == "SET_VERIFY_BTN":
+            set_setting("verify_button_text", text)
+            ADMIN_SESSIONS.pop(user_id, None)
+            send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Button text update ho gaya!"})
+            show_admin_panel(chat_id)
+            return "OK", 200
+
+        elif step == "SET_POSTER":
+            poster_val = "" if text.lower().strip() == "none" else text.strip()
+            set_setting("force_join_poster", poster_val)
+            ADMIN_SESSIONS.pop(user_id, None)
+            send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Poster link update ho gaya!"})
+            show_admin_panel(chat_id)
+            return "OK", 200
+            
         # /admin Command
-        if text == "/admin" and user_id in ADMIN_IDS:
+        if text and text.lower().strip() == "/admin" and user_id in ADMIN_IDS:
+            ADMIN_SESSIONS.pop(user_id, None)
             show_admin_panel(chat_id)
             return "OK", 200
 
