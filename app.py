@@ -79,7 +79,7 @@ def get_unjoined(user_id):
     channels = get_channels()
     unjoined = []
     for c in channels:
-        if not c.get("active") or not c.get("chat_id"):
+        if not c.get("chat_id"):
             continue
         try:
             res = requests.post(
