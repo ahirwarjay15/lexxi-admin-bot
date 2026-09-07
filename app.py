@@ -87,8 +87,18 @@ def get_unjoined(user_id):
                 json={"chat_id": c["chat_id"], "user_id": user_id},
                 timeout=4
             ).json()
-            if not res.get("ok") or res.get("result", {}).get("status") in ["left", "kicked"]:
+                    if not res.get("ok") or res.get("result", {}).get("status") in ["left", "kicked"]:
+            req_found = False
+            if supabase:
+                try:
+                    jr = supabase.table("join_requests").select("*").eq("user_id", user_id).eq("chat_id", str(c["chat_id"])).execute()
+                    if jr.data:
+                        req_found = True
+                except Exception:
+                    pass
+            if not req_found:
                 unjoined.append(c)
+
         except Exception:
             unjoined.append(c)
     return unjoined
