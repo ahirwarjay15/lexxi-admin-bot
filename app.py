@@ -87,7 +87,7 @@ def get_unjoined(user_id):
                 json={"chat_id": c["chat_id"], "user_id": user_id},
                 timeout=4
             ).json()
-                    if not res.get("ok") or res.get("result", {}).get("status") in ["left", "kicked"]:
+        if not res.get("ok") or res.get("result", {}).get("status") in ["left", "kicked"]:
             req_found = False
             if supabase:
                 try:
