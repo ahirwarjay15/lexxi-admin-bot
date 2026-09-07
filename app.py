@@ -319,9 +319,9 @@ def webhook():
         return "OK", 200
 
         if "chat_join_request" in data:
-        j_req = data["chat_join_request"]
-        chat_id = j_req["chat"]["id"]
-        user_id = j_req["from"]["id"]
+            j_req = data["chat_join_request"]
+            chat_id = j_req["chat"]["id"]
+            user_id = j_req["from"]["id"]
         
         try:
             supabase.table("join_requests").upsert({
