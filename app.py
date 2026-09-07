@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import threading
 import requests
@@ -16,16 +17,70 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 ADMIN_SESSIONS = {}
 
-# Aesthetic Small Caps Fonts with Dynamic {name}
-DEFAULT_WELCOME = ">> ʟᴏᴏᴋɪɴɢ ғᴏʀ ʜᴀᴄᴋs, ɪᴅs ᴏʀ ᴀɴʏᴛʜɪɴɢ ᴇʟsᴇ?\nᴍᴇssᴀɢᴇ [@lexxiowner](https://t.me/lexxiowner) — ᴡᴇ ᴍɪɢʜᴛ ʜᴀᴠᴇ ɪᴛ. ⚡"
-DEFAULT_ERROR = ">> ғᴀᴄɪɴɢ ᴀɴʏ ɪssᴜᴇ?\nᴄᴏɴᴛᴀᴄᴛ [@lexxiowner](https://t.me/lexxiowner) ғᴏʀ ʜᴇʟᴘ. ⚡"
-DEFAULT_FJ_TEXT = ">> ʜᴇʏ {name} ×\nʏᴏᴜʀ ғɪʟᴇ ɪs ʀᴇᴀᴅʏ\nʟᴏᴏᴋs ʟɪᴋᴇ ʏᴏᴜ ʜᴀᴠᴇɴ'ᴛ sᴜʙsᴄʀɪʙᴇᴅ ᴛᴏ\nᴏᴜʀ ᴄʜᴀɴɴᴇʟs ʏᴇᴛ,"
+# Exact Styled Defaults
+DEFAULT_WELCOME = ">> LOOKING FOR HACKS, ID'S OR ANYTHING ELSE?\nMESSAGE [@lexxiowner](https://t.me/lexxiowner) — WE MIGHT HAVE IT. ⚡"
+DEFAULT_ERROR = ">> FACING ANY ISSUE?\nCONTACT [@lexxiowner](https://t.me/lexxiowner) FOR HELP. ⚡"
+DEFAULT_FJ_TEXT = ">> HEY {name} ×\nYOUR FILE IS READY\nLOOKS LIKE YOU HAVEN'T JOINED TO\nOUR CHANNELS YET,"
+DEFAULT_POSTER = "https://t.me/c/3953020663/26"
+DEFAULT_STORAGE_CH = "-1004430375220"
+DEFAULT_UPDATE_URL = "https://t.me/lexxiowner"
+DEFAULT_VERIFY_BTN = "» VERIFY"
+DEFAULT_DELETE_DELAY = "300"  # 5 minutes
+
+DEFAULT_CHANNELS = [
+    {"slot": 1, "chat_id": -1001875503950, "button_text": "ʟᴇxɪ ᴍᴏᴅs", "join_url": "https://t.me/+JjB0fpWk8dAwZTBl", "active": True},
+    {"slot": 2, "chat_id": -1002991207510, "button_text": "ɪ'ᴅ sᴛᴏʀᴇ", "join_url": "https://t.me/+axSZFBZ5ztVkMTZl", "active": True},
+    {"slot": 3, "chat_id": -1003992674272, "button_text": "ғʀᴇᴇ ʜᴀᴄᴋ", "join_url": "https://t.me/BGMIHackLexi", "active": True},
+    {"slot": 4, "chat_id": -1004335377904, "button_text": "ʙᴀᴄᴋᴜᴘ", "join_url": "https://t.me/+G7-o7RSFmw8zOTI1", "active": True}
+]
+
+def init_defaults(force_reset=False):
+    try:
+        defaults = [
+            ("welcome_text", DEFAULT_WELCOME),
+            ("error_feedback_text", DEFAULT_ERROR),
+            ("force_join_text", DEFAULT_FJ_TEXT),
+            ("force_join_poster", DEFAULT_POSTER),
+            ("storage_channel_id", DEFAULT_STORAGE_CH),
+            ("update_channel_url", DEFAULT_UPDATE_URL),
+            ("verify_button_text", DEFAULT_VERIFY_BTN),
+            ("auto_delete_delay", DEFAULT_DELETE_DELAY)
+        ]
+        for k, v in defaults:
+            existing = supabase.table("settings").select("value").eq("key", k).execute()
+            if not existing.data or force_reset:
+                supabase.table("settings").upsert({"key": k, "value": v}).execute()
+
+        ch_res = supabase.table("force_join_channels").select("slot").execute()
+        existing_slots = [c["slot"] for c in (ch_res.data or [])]
+        for ch in DEFAULT_CHANNELS:
+            if ch["slot"] not in existing_slots or force_reset:
+                supabase.table("force_join_channels").upsert(ch, on_conflict="slot").execute()
+    except Exception as e:
+        print(f"Init defaults error: {e}")
+
+init_defaults()
+
+def clean_markdown_name(name):
+    if not name:
+        return "User"
+    return re.sub(r'([_*\[\]()~`>#+=|{}.!-])', r'\\\1', str(name))
 
 def send_tg_request(method, data):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
     try:
         r = requests.post(url, json=data, timeout=10)
-        return r.json()
+        res = r.json()
+        if not res.get("ok"):
+            if "parse_mode" in data and "can't parse entities" in res.get("description", ""):
+                fallback = data.copy()
+                fallback.pop("parse_mode", None)
+                if "caption" in fallback:
+                    fallback["caption"] = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', fallback["caption"]).replace("\\", "")
+                if "text" in fallback:
+                    fallback["text"] = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', fallback["text"]).replace("\\", "")
+                return requests.post(url, json=fallback, timeout=10).json()
+        return res
     except Exception as e:
         print(f"Error calling {method}: {e}")
         return {}
@@ -58,8 +113,8 @@ def get_unjoined_channels(user_id):
         chat_id = c.get("chat_id")
         if not chat_id:
             continue
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMember"
         try:
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMember"
             r = requests.post(url, json={"chat_id": chat_id, "user_id": user_id}, timeout=5).json()
             if not r.get("ok") or r.get("result", {}).get("status") in ["left", "kicked"]:
                 unjoined.append(c)
@@ -72,14 +127,11 @@ def send_or_update_force_join(chat_id, user_id, deep_link, user_name="User", mes
     if not unjoined:
         return True
 
-    btn_text = get_setting("verify_button_text", "⚡ ᴠᴇʀɪғʏ")
+    btn_text = get_setting("verify_button_text", DEFAULT_VERIFY_BTN)
     raw_caption = get_setting("force_join_text", DEFAULT_FJ_TEXT)
     
-    # Replace {name} placeholder or inject user name
-    if "{name}" in raw_caption:
-        fj_caption = raw_caption.replace("{name}", user_name)
-    else:
-        fj_caption = raw_caption
+    safe_name = clean_markdown_name(user_name)
+    fj_caption = raw_caption.replace("{name}", safe_name) if "{name}" in raw_caption else raw_caption
 
     poster_url = get_setting("force_join_poster", "")
 
@@ -87,7 +139,7 @@ def send_or_update_force_join(chat_id, user_id, deep_link, user_name="User", mes
     row = []
     for c in unjoined:
         title = c.get("button_text") or "Channel"
-        row.append({"text": f"• {title} ↗", "url": c.get("join_url")})
+        row.append({"text": f"{title} ↗", "url": c.get("join_url")})
         if len(row) == 2:
             keyboard.append(row)
             row = []
@@ -97,8 +149,10 @@ def send_or_update_force_join(chat_id, user_id, deep_link, user_name="User", mes
     keyboard.append([{"text": btn_text, "callback_data": f"verify:{deep_link}"}])
     reply_markup = {"inline_keyboard": keyboard}
 
+    has_photo = bool(poster_url and poster_url.lower() != "none" and not poster_url.startswith("https://t.me/c/"))
+
     if message_id:
-        if poster_url:
+        if has_photo:
             send_tg_request("editMessageCaption", {
                 "chat_id": chat_id,
                 "message_id": message_id,
@@ -115,7 +169,7 @@ def send_or_update_force_join(chat_id, user_id, deep_link, user_name="User", mes
                 "reply_markup": reply_markup
             })
     else:
-        if poster_url:
+        if has_photo:
             send_tg_request("sendPhoto", {
                 "chat_id": chat_id,
                 "photo": poster_url,
@@ -132,7 +186,9 @@ def send_or_update_force_join(chat_id, user_id, deep_link, user_name="User", mes
             })
     return False
 
-def auto_delete_task(chat_id, mids, delay=300):
+def auto_delete_task(chat_id, mids, delay):
+    if delay <= 0:
+        return
     time.sleep(delay)
     for m in mids:
         if m:
@@ -147,7 +203,7 @@ def deliver_file(chat_id, deep_link):
         return
 
     app_data = res.data[0]
-    storage_channel = get_setting("storage_channel_id", "")
+    storage_channel = get_setting("storage_channel_id", DEFAULT_STORAGE_CH)
     storage_msg_id = app_data.get("storage_message_id")
 
     fwd_res = send_tg_request("copyMessage", {
@@ -173,38 +229,43 @@ def deliver_file(chat_id, deep_link):
         if p_res.get("ok"):
             mids_to_delete.append(p_res.get("result", {}).get("message_id"))
 
-    update_url = get_setting("update_channel_url", "https://t.me/lexxiowner")
-    warn_kb = [[{"text": "📟 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ", "url": update_url}]]
-    warn_text = (
-        "⚠️ **ɪᴍᴘᴏʀᴛᴀɴᴛ ɴᴏᴛɪᴄᴇ:**\n\n"
-        "_ᴀʟʟ ᴍᴇssᴀɢᴇs ᴡɪʟʟ ʙᴇ ᴅᴇʟᴇᴛᴇᴅ ᴀғᴛᴇʀ 𝟻 ᴍɪɴᴜᴛᴇs.\n"
-        "ᴘʟᴇᴀsᴇ ғᴏʀᴡᴀʀᴅ/sᴀᴠᴇ ᴛʜɪs ғɪʟᴇ ᴛᴏ ʏᴏᴜʀ sᴀᴠᴇᴅ ᴍᴇssᴀɢᴇs!_"
-    )
-    w_res = send_tg_request("sendMessage", {
-        "chat_id": chat_id,
-        "text": warn_text,
-        "parse_mode": "Markdown",
-        "reply_markup": {"inline_keyboard": warn_kb}
-    })
-    if w_res.get("ok"):
-        mids_to_delete.append(w_res.get("result", {}).get("message_id"))
+    # Configurable Auto Delete Delay
+    delay_sec = int(get_setting("auto_delete_delay", DEFAULT_DELETE_DELAY))
+    mins = delay_sec // 60
 
-    threading.Thread(target=auto_delete_task, args=(chat_id, mids_to_delete), daemon=True).start()
+    if delay_sec > 0:
+        time_text = f"{mins} minutes" if mins > 0 else f"{delay_sec} seconds"
+        warn_text = (
+            "⚠️ **ɪᴍᴘᴏʀᴛᴀɴᴛ ɴᴏᴛɪᴄᴇ:**\n\n"
+            f"_ᴀʟʟ ᴍᴇssᴀɢᴇs ᴡɪʟʟ ʙᴇ ᴅᴇʟᴇᴛᴇᴅ ᴀғᴛᴇʀ {time_text}.\n"
+            "ᴘʟᴇᴀsᴇ ғᴏʀᴡᴀʀᴅ/sᴀᴠᴇ ᴛʜɪs ғɪʟᴇ ᴛᴏ ʏᴏᴜʀ sᴀᴠᴇᴅ ᴍᴇssᴀɢᴇs!_"
+        )
+        update_url = get_setting("update_channel_url", DEFAULT_UPDATE_URL)
+        warn_kb = [[{"text": "📟 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ", "url": update_url}]]
+        w_res = send_tg_request("sendMessage", {
+            "chat_id": chat_id,
+            "text": warn_text,
+            "parse_mode": "Markdown",
+            "reply_markup": {"inline_keyboard": warn_kb}
+        })
+        if w_res.get("ok"):
+            mids_to_delete.append(w_res.get("result", {}).get("message_id"))
 
-def show_admin_panel(chat_id):
+        threading.Thread(target=auto_delete_task, args=(chat_id, mids_to_delete, delay_sec), daemon=True).start()
+
+def show_admin_panel(chat_id, message_id=None):
     keyboard = [
-        [{"text": "➕ ᴀᴅᴅ ғɪʟᴇ", "callback_data": "adm_add_app"}, {"text": "🗑️ ᴅᴇʟᴇᴛᴇ ғɪʟᴇ", "callback_data": "adm_del_app"}],
-        [{"text": "📁 ʟɪsᴛ ғɪʟᴇs", "callback_data": "adm_list_apps"}],
-        [{"text": "📢 ғᴏʀᴄᴇ ᴊᴏɪɴ", "callback_data": "adm_fj_menu"}, {"text": "👥 ᴜsᴇʀ sᴛᴀᴛs", "callback_data": "adm_stats"}],
-        [{"text": "📣 ʙʀᴏᴀᴅᴄᴀsᴛ", "callback_data": "adm_broadcast"}],
-        [{"text": "⚙️ ᴄᴏɴғɪɢ / sᴇᴛᴛɪɴɢs", "callback_data": "adm_settings"}]
+        [{"text": "➕ Add File", "callback_data": "adm_add_app"}, {"text": "🗑️ Delete File", "callback_data": "adm_del_app"}],
+        [{"text": "📁 Manage Files", "callback_data": "adm_list_apps"}],
+        [{"text": "📢 Force Join Slots (Edit/Remove)", "callback_data": "adm_fj_menu"}],
+        [{"text": "⏱️ Auto-Delete Timer", "callback_data": "adm_timer_menu"}, {"text": "👥 User Stats", "callback_data": "adm_stats"}],
+        [{"text": "📣 Broadcast", "callback_data": "adm_broadcast"}, {"text": "⚙️ Settings & Messages", "callback_data": "adm_settings"}]
     ]
-    send_tg_request("sendMessage", {
-        "chat_id": chat_id,
-        "text": "🎛 **ᴀᴅᴍɪɴ ᴄᴏɴᴛʀᴏʟ ᴘᴀɴᴇʟ**\n\nSelect an option below to manage bot configurations:",
-        "parse_mode": "Markdown",
-        "reply_markup": {"inline_keyboard": keyboard}
-    })
+    text = "🎛 **ᴀᴅᴍɪɴ ᴄᴏɴᴛʀᴏʟ ᴘᴀɴᴇʟ**\n\nManage files, force-join channels, auto-delete timers, and bot messages:"
+    if message_id:
+        send_tg_request("editMessageText", {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "Markdown", "reply_markup": {"inline_keyboard": keyboard}})
+    else:
+        send_tg_request("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": {"inline_keyboard": keyboard}})
 
 @app.route("/", methods=["GET"])
 def home():
@@ -239,268 +300,140 @@ def webhook():
 
         elif user_id in ADMIN_IDS:
             if cb_data == "adm_main":
-                show_admin_panel(chat_id)
-            elif cb_data == "adm_add_app":
-                ADMIN_SESSIONS[user_id] = {"step": "APP_TITLE"}
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "📝 File/Content ka **Title** bhejo:"})
-            elif cb_data == "adm_del_app":
-                ADMIN_SESSIONS[user_id] = {"step": "DEL_APP"}
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "🗑️ Delete karne ke liye file ka **Unique Code** bhejo:"})
-            elif cb_data == "adm_list_apps":
-                apps = supabase.table("apps").select("*").limit(20).execute().data or []
-                text = "📁 **ʀᴇᴄᴇɴᴛʟʏ ᴀᴅᴅᴇᴅ ғɪʟᴇs:**\n\n"
-                for a in apps:
-                    text += f"• **{a['title']}** (Code: `{a['deep_link_code']}`)\n🔗 Link: `https://t.me/LexxiAdminBot?start={a['deep_link_code']}`\n\n"
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": text or "Koi files nahi mili."})
+                show_admin_panel(chat_id, message_id)
+            
+            # --- FORCE JOIN MENU & CONTROLS ---
             elif cb_data == "adm_fj_menu":
                 channels = supabase.table("force_join_channels").select("*").order("slot").execute().data or []
                 btns = []
                 for c in channels:
-                    status = "🟢" if c.get("active") else "🔴"
-                    btns.append([{"text": f"Slot {c['slot']} {status} {c.get('button_text', '')}", "callback_data": f"adm_slot_{c['slot']}"}])
+                    status = "🟢 ON" if c.get("active") else "🔴 OFF"
+                    name = c.get('button_text', 'Empty')
+                    btns.append([{"text": f"Slot {c['slot']}: {name} [{status}]", "callback_data": f"slot_view_{c['slot']}"}])
                 btns.append([{"text": "⬅️ Back", "callback_data": "adm_main"}])
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "📢 **Force Join Channels Setup:**", "reply_markup": {"inline_keyboard": btns}})
-            elif cb_data.startswith("adm_slot_"):
+                send_tg_request("editMessageText", {
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": "📢 **Force Join Slots Management:**\nTap a slot below to edit, toggle on/off, or remove it:",
+                    "parse_mode": "Markdown",
+                    "reply_markup": {"inline_keyboard": btns}
+                })
+
+            elif cb_data.startswith("slot_view_"):
+                slot = int(cb_data.split("_")[2])
+                ch_res = supabase.table("force_join_channels").select("*").eq("slot", slot).execute().data
+                ch = ch_res[0] if ch_res else {}
+                status_txt = "🟢 Active (Enabled)" if ch.get("active") else "🔴 Inactive (Disabled)"
+                info_text = (
+                    f"⚙️ **Slot {slot} Configuration**\n\n"
+                    f"• **Status:** {status_txt}\n"
+                    f"• **Name:** `{ch.get('button_text', 'None')}`\n"
+                    f"• **Chat ID:** `{ch.get('chat_id', 'None')}`\n"
+                    f"• **Join Link:** `{ch.get('join_url', 'None')}`"
+                )
+                toggle_txt = "🔴 Turn OFF" if ch.get("active") else "🟢 Turn ON"
+                btns = [
+                    [{"text": toggle_txt, "callback_data": f"slot_toggle_{slot}"}, {"text": "✏️ Edit Details", "callback_data": f"slot_edit_{slot}"}],
+                    [{"text": "🗑️ Clear / Remove Slot", "callback_data": f"slot_clear_{slot}"}],
+                    [{"text": "⬅️ Back to Slots", "callback_data": "adm_fj_menu"}]
+                ]
+                send_tg_request("editMessageText", {
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": info_text,
+                    "parse_mode": "Markdown",
+                    "reply_markup": {"inline_keyboard": btns}
+                })
+
+            elif cb_data.startswith("slot_toggle_"):
+                slot = int(cb_data.split("_")[2])
+                ch_res = supabase.table("force_join_channels").select("active").eq("slot", slot).execute().data
+                current = ch_res[0]["active"] if ch_res else False
+                supabase.table("force_join_channels").update({"active": not current}).eq("slot", slot).execute()
+                # Re-render slot view
+                cq["data"] = f"slot_view_{slot}"
+                webhook()
+
+            elif cb_data.startswith("slot_clear_"):
+                slot = int(cb_data.split("_")[2])
+                supabase.table("force_join_channels").update({
+                    "chat_id": 0,
+                    "button_text": "Empty",
+                    "join_url": "",
+                    "active": False
+                }).eq("slot", slot).execute()
+                send_tg_request("answerCallbackQuery", {"callback_query_id": cq_id, "text": f"Slot {slot} has been cleared!"})
+                # Re-render
+                cq["data"] = f"slot_view_{slot}"
+                webhook()
+
+            elif cb_data.startswith("slot_edit_"):
                 slot = int(cb_data.split("_")[2])
                 ADMIN_SESSIONS[user_id] = {"step": "FJ_CONFIG", "slot": slot}
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"Slot {slot} ke liye is format me details bhejo:\n`Chat_ID | Button_Name | Invite_Link`\n\nBand karne ke liye `disable` bhejein."})
-            elif cb_data == "adm_stats":
-                count = len(supabase.table("users").select("telegram_user_id").execute().data or [])
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"👥 **ᴛᴏᴛᴀʟ ᴜsᴇʀs ɪɴ ᴅᴀᴛᴀʙᴀsᴇ:** `{count}`"})
-            elif cb_data == "adm_broadcast":
-                ADMIN_SESSIONS[user_id] = {"step": "BROADCAST"}
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "📣 Sabhi users ko broadcast karne wala message bhejo:"})
-            elif cb_data == "adm_settings":
-                welcome_txt = get_setting("welcome_text", DEFAULT_WELCOME)
-                err_txt = get_setting("error_feedback_text", DEFAULT_ERROR)
-                fj_text = get_setting("force_join_text", DEFAULT_FJ_TEXT)
-                btn_text = get_setting("verify_button_text", "⚡ ᴠᴇʀɪғʏ")
-                poster = get_setting("force_join_poster", "None")
-                storage_ch = get_setting("storage_channel_id", "Not Configured")
-                up_url = get_setting("update_channel_url", "https://t.me/lexxiowner")
+                send_tg_request("sendMessage", {
+                    "chat_id": chat_id,
+                    "text": f"📝 **Send new details for Slot {slot}:**\n\nFormat:\n`Chat_ID | Button_Name | Invite_Link`\n\nExample:\n`-1001875503950 | ʟᴇxɪ ᴍᴏᴅs | https://t.me/+JjB0fpWk8dAwZTBl`",
+                    "parse_mode": "Markdown"
+                })
 
-                text = (
-                    "⚙️ **ʙᴏᴛ ᴄᴏɴғɪɢᴜʀᴀᴛɪᴏɴs**\n\n"
-                    f"**👋 Welcome Msg:**\n{welcome_txt}\n\n"
-                    f"**⚠️ Error Msg:**\n{err_txt}\n\n"
-                    f"**📦 Storage Channel ID:** `{storage_ch}`\n"
-                    f"**🔗 Update Channel:** `{up_url}`\n\n"
-                    f"**📢 Force Join Caption:**\n{fj_text}\n\n"
-                    f"**🔘 Verify Button:** `{btn_text}`\n"
-                    f"**🖼️ Poster Link:** `{poster}`"
-                )
-                keyboard = [
-                    [{"text": "👋 Edit Welcome", "callback_data": "set_msg_welcome"}, {"text": "⚠️ Edit Error", "callback_data": "set_msg_error"}],
-                    [{"text": "📦 Set Storage ID", "callback_data": "set_msg_storage_ch"}, {"text": "🔗 Set Update Link", "callback_data": "set_msg_up_url"}],
-                    [{"text": "📝 Edit FJ Caption", "callback_data": "set_msg_fj_text"}, {"text": "🔘 Edit Verify Button", "callback_data": "set_msg_verify_btn"}],
-                    [{"text": "🖼️ Edit Poster Link", "callback_data": "set_msg_poster"}],
+            # --- AUTO DELETE TIMER MENU ---
+            elif cb_data == "adm_timer_menu":
+                curr_del = get_setting("auto_delete_delay", DEFAULT_DELETE_DELAY)
+                btns = [
+                    [{"text": "Off (0s)", "callback_data": "timer_set_0"}, {"text": "30 Seconds", "callback_data": "timer_set_30"}],
+                    [{"text": "1 Minute", "callback_data": "timer_set_60"}, {"text": "2 Minutes", "callback_data": "timer_set_120"}],
+                    [{"text": "5 Minutes (Default)", "callback_data": "timer_set_300"}, {"text": "10 Minutes", "callback_data": "timer_set_600"}],
                     [{"text": "⬅️ Back", "callback_data": "adm_main"}]
                 ]
-                send_tg_request("sendMessage", {
+                send_tg_request("editMessageText", {
                     "chat_id": chat_id,
-                    "text": text,
+                    "message_id": message_id,
+                    "text": f"⏱️ **Auto-Delete Timer Settings**\n\nCurrent Duration: `{curr_del} seconds` ({int(curr_del)//60} mins)\nSelect a timer below:",
                     "parse_mode": "Markdown",
-                    "reply_markup": {"inline_keyboard": keyboard}
+                    "reply_markup": {"inline_keyboard": btns}
                 })
-            elif cb_data == "set_msg_welcome":
-                ADMIN_SESSIONS[user_id] = {"step": "SET_WELCOME_MSG"}
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Naya Welcome message bhejo:"})
-            elif cb_data == "set_msg_error":
-                ADMIN_SESSIONS[user_id] = {"step": "SET_ERROR_MSG"}
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Naya Error message bhejo:"})
-            elif cb_data == "set_msg_storage_ch":
-                ADMIN_SESSIONS[user_id] = {"step": "SET_STORAGE_CH"}
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Storage Channel ID bhejo (jaise `-100xxxxxxxxxx`):"})
-            elif cb_data == "set_msg_up_url":
-                ADMIN_SESSIONS[user_id] = {"step": "SET_UP_URL"}
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Update Channel ka link bhejo:"})
-            elif cb_data == "set_msg_fj_text":
-                ADMIN_SESSIONS[user_id] = {"step": "SET_FJ_TEXT"}
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Naya Force Join message caption bhejo (user name ke liye `{name}` use kar sakte hain):"})
-            elif cb_data == "set_msg_verify_btn":
-                ADMIN_SESSIONS[user_id] = {"step": "SET_VERIFY_BTN"}
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Naya Verify Button text bhejo:"})
-            elif cb_data == "set_msg_poster":
-                ADMIN_SESSIONS[user_id] = {"step": "SET_POSTER"}
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Poster image URL bhejo (ya `none` bhejo):"})
 
-        return "OK", 200
+            elif cb_data.startswith("timer_set_"):
+                new_sec = cb_data.split("_")[2]
+                set_setting("auto_delete_delay", new_sec)
+                send_tg_request("answerCallbackQuery", {"callback_query_id": cq_id, "text": f"Timer set to {new_sec}s!"})
+                show_admin_panel(chat_id, message_id)
 
-    if "message" in data:
-        msg = data["message"]
-        chat_id = msg["chat"]["id"]
-        from_user = msg["from"]
-        user_id = from_user["id"]
-        user_name = from_user.get("first_name", "User")
-        username = from_user.get("username", "")
-        text = msg.get("text", "")
-
-        try:
-            supabase.table("users").upsert({"telegram_user_id": user_id, "username": username}).execute()
-        except Exception:
-            pass
-
-        if text and text.lower().strip() == "/admin" and user_id in ADMIN_IDS:
-            ADMIN_SESSIONS.pop(user_id, None)
-            show_admin_panel(chat_id)
-            return "OK", 200
-
-        if user_id in ADMIN_IDS and user_id in ADMIN_SESSIONS:
-            sess = ADMIN_SESSIONS[user_id]
-            step = sess.get("step")
-
-            if step == "APP_TITLE":
-                sess["title"] = text
-                sess["step"] = "APP_CODE"
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Deep-link ke liye ek **Short Code** bhejo (jaise `1`, `ep01`, `hack01`):"})
-                return "OK", 200
-
-            elif step == "APP_CODE":
-                sess["code"] = text.strip()
-                sess["step"] = "APP_FILE"
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Storage Channel se file yahan **FORWARD** karein:"})
-                return "OK", 200
-
-            elif step == "APP_FILE":
-                fwd_mid = msg.get("forward_from_message_id")
-                fwd_chat = msg.get("forward_from_chat", {})
-                if not fwd_mid:
-                    send_tg_request("sendMessage", {"chat_id": chat_id, "text": "⚠️ Kripya Storage channel se file seedha FORWARD karein."})
-                    return "OK", 200
-
-                sess["storage_id"] = fwd_mid
-                if fwd_chat and fwd_chat.get("id"):
-                    set_setting("storage_channel_id", str(fwd_chat.get("id")))
-
-                sess["step"] = "APP_PASS"
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "Password bhejein (agar password nahi rakhna to `none` likhein):"})
-                return "OK", 200
-
-            elif step == "APP_PASS":
-                pwd = "" if text.strip().lower() == "none" else text.strip()
-                supabase.table("apps").upsert({
-                    "title": sess["title"],
-                    "deep_link_code": sess["code"],
-                    "storage_message_id": sess["storage_id"],
-                    "password": pwd,
-                    "active": True
-                }, on_conflict="deep_link_code").execute()
-                ADMIN_SESSIONS.pop(user_id, None)
-                send_tg_request("sendMessage", {
-                    "chat_id": chat_id,
-                    "text": f"✅ **File Successfully Saved!**\n\n🔗 **Link:** `https://t.me/LexxiAdminBot?start={sess['code']}`",
-                    "parse_mode": "Markdown"
-                })
-                return "OK", 200
-
-            elif step == "DEL_APP":
-                code_to_del = text.strip()
-                supabase.table("apps").delete().eq("deep_link_code", code_to_del).execute()
-                ADMIN_SESSIONS.pop(user_id, None)
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"✅ File code `{code_to_del}` delete kar di gayi hai!"})
-                show_admin_panel(chat_id)
-                return "OK", 200
-
-            elif step == "SET_STORAGE_CH":
-                set_setting("storage_channel_id", text.strip())
-                ADMIN_SESSIONS.pop(user_id, None)
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"✅ Storage Channel ID set: `{text.strip()}`"})
-                show_admin_panel(chat_id)
-                return "OK", 200
-
-            elif step == "SET_UP_URL":
-                set_setting("update_channel_url", text.strip())
-                ADMIN_SESSIONS.pop(user_id, None)
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Update Channel link update ho gaya!"})
-                show_admin_panel(chat_id)
-                return "OK", 200
-
-            elif step == "FJ_CONFIG":
-                slot = sess["slot"]
-                if text.strip().lower() == "disable":
-                    supabase.table("force_join_channels").update({"active": False}).eq("slot", slot).execute()
-                    send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"Slot {slot} disable kar diya gaya."})
+            # --- FILE MANAGEMENT WITH 1-CLICK DELETE ---
+            elif cb_data == "adm_list_apps":
+                apps = supabase.table("apps").select("*").order("created_at", desc=True).limit(10).execute().data or []
+                if not apps:
+                    send_tg_request("sendMessage", {"chat_id": chat_id, "text": "📁 Koi file database me nahi hai."})
                 else:
-                    parts = [p.strip() for p in text.split("|")]
-                    if len(parts) == 3:
-                        c_id, b_text, j_url = int(parts[0]), parts[1], parts[2]
-                        supabase.table("force_join_channels").update({
-                            "chat_id": c_id,
-                            "button_text": b_text,
-                            "join_url": j_url,
-                            "active": True
-                        }).eq("slot", slot).execute()
-                        send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"✅ Slot {slot} update ho gaya!"})
-                    else:
-                        send_tg_request("sendMessage", {"chat_id": chat_id, "text": "⚠️ Format galat tha. Format: `Chat_ID | Name | Link`"})
-                ADMIN_SESSIONS.pop(user_id, None)
-                return "OK", 200
+                    for a in apps:
+                        code = a['deep_link_code']
+                        link = f"https://t.me/LexxiAdminBot?start={code}"
+                        kb = [[{"text": f"🗑️ Delete `{code}`", "callback_data": f"quick_del_{code}"}]]
+                        send_tg_request("sendMessage", {
+                            "chat_id": chat_id,
+                            "text": f"📦 **{a['title']}**\n• Code: `{code}`\n• Link: {link}",
+                            "reply_markup": {"inline_keyboard": kb}
+                        })
+                    show_admin_panel(chat_id)
 
-            elif step == "BROADCAST":
-                ADMIN_SESSIONS.pop(user_id, None)
-                users = supabase.table("users").select("telegram_user_id").execute().data or []
-                sent = 0
-                for u in users:
-                    res = send_tg_request("sendMessage", {"chat_id": u["telegram_user_id"], "text": text})
-                    if res.get("ok"):
-                        sent += 1
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"📢 Broadcast complete: {sent} users ko deliver hua."})
-                return "OK", 200
-
-            elif step == "SET_WELCOME_MSG":
-                set_setting("welcome_text", text)
-                ADMIN_SESSIONS.pop(user_id, None)
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Welcome message update ho gaya!"})
-                show_admin_panel(chat_id)
-                return "OK", 200
-
-            elif step == "SET_ERROR_MSG":
-                set_setting("error_feedback_text", text)
-                ADMIN_SESSIONS.pop(user_id, None)
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Error message update ho gaya!"})
-                show_admin_panel(chat_id)
-                return "OK", 200
-
-            elif step == "SET_FJ_TEXT":
-                set_setting("force_join_text", text)
-                ADMIN_SESSIONS.pop(user_id, None)
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Force join caption update ho gaya!"})
-                show_admin_panel(chat_id)
-                return "OK", 200
-
-            elif step == "SET_VERIFY_BTN":
-                set_setting("verify_button_text", text)
-                ADMIN_SESSIONS.pop(user_id, None)
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Button text update ho gaya!"})
-                show_admin_panel(chat_id)
-                return "OK", 200
-
-            elif step == "SET_POSTER":
-                poster_val = "" if text.lower().strip() == "none" else text.strip()
-                set_setting("force_join_poster", poster_val)
-                ADMIN_SESSIONS.pop(user_id, None)
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "✅ Poster link update ho gaya!"})
-                show_admin_panel(chat_id)
-                return "OK", 200
-
-        # /start handler
-        if text.startswith("/start"):
-            args = text.split()
-            if len(args) > 1:
-                deep_link = args[1].strip()
-                all_joined = send_or_update_force_join(chat_id, user_id, deep_link, user_name=user_name)
-                if all_joined:
-                    deliver_file(chat_id, deep_link)
-            else:
-                welcome_msg = get_setting("welcome_text", DEFAULT_WELCOME)
-                send_tg_request("sendMessage", {
-                    "chat_id": chat_id, 
-                    "text": welcome_msg, 
+            elif cb_data.startswith("quick_del_"):
+                del_code = cb_data.split("_")[2]
+                supabase.table("apps").delete().eq("deep_link_code", del_code).execute()
+                send_tg_request("editMessageText", {
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": f"🗑️ **File with code `{del_code}` has been deleted.**",
                     "parse_mode": "Markdown"
                 })
-            return "OK", 200
 
-    return "OK", 200
+            elif cb_data == "adm_add_app":
+                ADMIN_SESSIONS[user_id] = {"step": "APP_TITLE"}
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "📝 File/Content ka **Title** bhejo:"})
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+            elif cb_data == "adm_del_app":
+                ADMIN_SESSIONS[user_id] = {"step": "DEL_APP"}
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "🗑️ Delete karne ke liye file ka **Unique Code** bhejo:"})
+
+            elif cb_data == "adm_stats":
+                count = len(supabase.table("users").select("telegram_user_id").execute().data or [])
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"👥 **ᴛᴏᴛᴀʟ ᴜs
