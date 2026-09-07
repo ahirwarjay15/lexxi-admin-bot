@@ -25,7 +25,7 @@ DEFAULT_POSTER = "https://t.me/c/3953020663/26"
 DEFAULT_STORAGE_CH = "-1004430375220"
 DEFAULT_UPDATE_URL = "https://t.me/lexxiowner"
 DEFAULT_VERIFY_BTN = "» VERIFY"
-DEFAULT_DELETE_DELAY = "300"  # 5 minutes
+DEFAULT_DELETE_DELAY = "300"
 
 DEFAULT_CHANNELS = [
     {"slot": 1, "chat_id": -1001875503950, "button_text": "ʟᴇxɪ ᴍᴏᴅs", "join_url": "https://t.me/+JjB0fpWk8dAwZTBl", "active": True},
@@ -34,7 +34,8 @@ DEFAULT_CHANNELS = [
     {"slot": 4, "chat_id": -1004335377904, "button_text": "ʙᴀᴄᴋᴜᴘ", "join_url": "https://t.me/+G7-o7RSFmw8zOTI1", "active": True}
 ]
 
-def init_defaults(force_reset=False):
+def init_defaults_background():
+    time.sleep(2)
     try:
         defaults = [
             ("welcome_text", DEFAULT_WELCOME),
@@ -48,18 +49,18 @@ def init_defaults(force_reset=False):
         ]
         for k, v in defaults:
             existing = supabase.table("settings").select("value").eq("key", k).execute()
-            if not existing.data or force_reset:
+            if not existing.data:
                 supabase.table("settings").upsert({"key": k, "value": v}).execute()
 
         ch_res = supabase.table("force_join_channels").select("slot").execute()
         existing_slots = [c["slot"] for c in (ch_res.data or [])]
         for ch in DEFAULT_CHANNELS:
-            if ch["slot"] not in existing_slots or force_reset:
+            if ch["slot"] not in existing_slots:
                 supabase.table("force_join_channels").upsert(ch, on_conflict="slot").execute()
     except Exception as e:
-        print(f"Init defaults error: {e}")
+        print(f"Background init error: {e}")
 
-init_defaults()
+threading.Thread(target=init_defaults_background, daemon=True).start()
 
 def clean_markdown_name(name):
     if not name:
@@ -132,7 +133,6 @@ def send_or_update_force_join(chat_id, user_id, deep_link, user_name="User", mes
     
     safe_name = clean_markdown_name(user_name)
     fj_caption = raw_caption.replace("{name}", safe_name) if "{name}" in raw_caption else raw_caption
-
     poster_url = get_setting("force_join_poster", "")
 
     keyboard = []
@@ -229,7 +229,6 @@ def deliver_file(chat_id, deep_link):
         if p_res.get("ok"):
             mids_to_delete.append(p_res.get("result", {}).get("message_id"))
 
-    # Configurable Auto Delete Delay
     delay_sec = int(get_setting("auto_delete_delay", DEFAULT_DELETE_DELAY))
     mins = delay_sec // 60
 
@@ -261,11 +260,36 @@ def show_admin_panel(chat_id, message_id=None):
         [{"text": "⏱️ Auto-Delete Timer", "callback_data": "adm_timer_menu"}, {"text": "👥 User Stats", "callback_data": "adm_stats"}],
         [{"text": "📣 Broadcast", "callback_data": "adm_broadcast"}, {"text": "⚙️ Settings & Messages", "callback_data": "adm_settings"}]
     ]
-    text = "🎛 **ᴀᴅᴍɪɴ ᴄᴏɴᴛʀᴏʟ ᴘᴀɴᴇʟ**\n\nManage files, force-join channels, auto-delete timers, and bot messages:"
+    text = "🎛 **ᴀᴅᴍɪɴ ᴄᴏɴᴛʀᴏʟ ᴘᴀɴᴇʟ**\n\nManage files, force-join channels, auto-delete timers, and bot configurations:"
     if message_id:
         send_tg_request("editMessageText", {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "Markdown", "reply_markup": {"inline_keyboard": keyboard}})
     else:
         send_tg_request("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": {"inline_keyboard": keyboard}})
+
+def render_slot_view(chat_id, message_id, slot):
+    ch_res = supabase.table("force_join_channels").select("*").eq("slot", slot).execute().data
+    ch = ch_res[0] if ch_res else {}
+    status_txt = "🟢 Active (Enabled)" if ch.get("active") else "🔴 Inactive (Disabled)"
+    info_text = (
+        f"⚙️ **Slot {slot} Configuration**\n\n"
+        f"• **Status:** {status_txt}\n"
+        f"• **Name:** `{ch.get('button_text', 'None')}`\n"
+        f"• **Chat ID:** `{ch.get('chat_id', 'None')}`\n"
+        f"• **Join Link:** `{ch.get('join_url', 'None')}`"
+    )
+    toggle_txt = "🔴 Turn OFF" if ch.get("active") else "🟢 Turn ON"
+    btns = [
+        [{"text": toggle_txt, "callback_data": f"slot_toggle_{slot}"}, {"text": "✏️ Edit Details", "callback_data": f"slot_edit_{slot}"}],
+        [{"text": "🗑️ Clear / Remove Slot", "callback_data": f"slot_clear_{slot}"}],
+        [{"text": "⬅️ Back to Slots", "callback_data": "adm_fj_menu"}]
+    ]
+    send_tg_request("editMessageText", {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": info_text,
+        "parse_mode": "Markdown",
+        "reply_markup": {"inline_keyboard": btns}
+    })
 
 @app.route("/", methods=["GET"])
 def home():
@@ -302,7 +326,6 @@ def webhook():
             if cb_data == "adm_main":
                 show_admin_panel(chat_id, message_id)
             
-            # --- FORCE JOIN MENU & CONTROLS ---
             elif cb_data == "adm_fj_menu":
                 channels = supabase.table("force_join_channels").select("*").order("slot").execute().data or []
                 btns = []
@@ -321,38 +344,14 @@ def webhook():
 
             elif cb_data.startswith("slot_view_"):
                 slot = int(cb_data.split("_")[2])
-                ch_res = supabase.table("force_join_channels").select("*").eq("slot", slot).execute().data
-                ch = ch_res[0] if ch_res else {}
-                status_txt = "🟢 Active (Enabled)" if ch.get("active") else "🔴 Inactive (Disabled)"
-                info_text = (
-                    f"⚙️ **Slot {slot} Configuration**\n\n"
-                    f"• **Status:** {status_txt}\n"
-                    f"• **Name:** `{ch.get('button_text', 'None')}`\n"
-                    f"• **Chat ID:** `{ch.get('chat_id', 'None')}`\n"
-                    f"• **Join Link:** `{ch.get('join_url', 'None')}`"
-                )
-                toggle_txt = "🔴 Turn OFF" if ch.get("active") else "🟢 Turn ON"
-                btns = [
-                    [{"text": toggle_txt, "callback_data": f"slot_toggle_{slot}"}, {"text": "✏️ Edit Details", "callback_data": f"slot_edit_{slot}"}],
-                    [{"text": "🗑️ Clear / Remove Slot", "callback_data": f"slot_clear_{slot}"}],
-                    [{"text": "⬅️ Back to Slots", "callback_data": "adm_fj_menu"}]
-                ]
-                send_tg_request("editMessageText", {
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "text": info_text,
-                    "parse_mode": "Markdown",
-                    "reply_markup": {"inline_keyboard": btns}
-                })
+                render_slot_view(chat_id, message_id, slot)
 
             elif cb_data.startswith("slot_toggle_"):
                 slot = int(cb_data.split("_")[2])
                 ch_res = supabase.table("force_join_channels").select("active").eq("slot", slot).execute().data
                 current = ch_res[0]["active"] if ch_res else False
                 supabase.table("force_join_channels").update({"active": not current}).eq("slot", slot).execute()
-                # Re-render slot view
-                cq["data"] = f"slot_view_{slot}"
-                webhook()
+                render_slot_view(chat_id, message_id, slot)
 
             elif cb_data.startswith("slot_clear_"):
                 slot = int(cb_data.split("_")[2])
@@ -362,10 +361,7 @@ def webhook():
                     "join_url": "",
                     "active": False
                 }).eq("slot", slot).execute()
-                send_tg_request("answerCallbackQuery", {"callback_query_id": cq_id, "text": f"Slot {slot} has been cleared!"})
-                # Re-render
-                cq["data"] = f"slot_view_{slot}"
-                webhook()
+                render_slot_view(chat_id, message_id, slot)
 
             elif cb_data.startswith("slot_edit_"):
                 slot = int(cb_data.split("_")[2])
@@ -376,7 +372,6 @@ def webhook():
                     "parse_mode": "Markdown"
                 })
 
-            # --- AUTO DELETE TIMER MENU ---
             elif cb_data == "adm_timer_menu":
                 curr_del = get_setting("auto_delete_delay", DEFAULT_DELETE_DELAY)
                 btns = [
@@ -388,7 +383,7 @@ def webhook():
                 send_tg_request("editMessageText", {
                     "chat_id": chat_id,
                     "message_id": message_id,
-                    "text": f"⏱️ **Auto-Delete Timer Settings**\n\nCurrent Duration: `{curr_del} seconds` ({int(curr_del)//60} mins)\nSelect a timer below:",
+                    "text": f"⏱️ **Auto-Delete Timer Settings**\n\nCurrent Duration: `{curr_del}s`\nSelect a timer below:",
                     "parse_mode": "Markdown",
                     "reply_markup": {"inline_keyboard": btns}
                 })
@@ -396,10 +391,8 @@ def webhook():
             elif cb_data.startswith("timer_set_"):
                 new_sec = cb_data.split("_")[2]
                 set_setting("auto_delete_delay", new_sec)
-                send_tg_request("answerCallbackQuery", {"callback_query_id": cq_id, "text": f"Timer set to {new_sec}s!"})
                 show_admin_panel(chat_id, message_id)
 
-            # --- FILE MANAGEMENT WITH 1-CLICK DELETE ---
             elif cb_data == "adm_list_apps":
                 apps = supabase.table("apps").select("*").order("created_at", desc=True).limit(10).execute().data or []
                 if not apps:
@@ -436,4 +429,16 @@ def webhook():
 
             elif cb_data == "adm_stats":
                 count = len(supabase.table("users").select("telegram_user_id").execute().data or [])
-                send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"👥 **ᴛᴏᴛᴀʟ ᴜs
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": f"👥 **ᴛᴏᴛᴀʟ ᴜsᴇʀs ɪɴ ᴅᴀᴛᴀʙᴀsᴇ:** `{count}`"})
+
+            elif cb_data == "adm_broadcast":
+                ADMIN_SESSIONS[user_id] = {"step": "BROADCAST"}
+                send_tg_request("sendMessage", {"chat_id": chat_id, "text": "📣 Sabhi users ko broadcast karne wala message bhejo:"})
+
+            elif cb_data == "adm_settings":
+                welcome_txt = get_setting("welcome_text", DEFAULT_WELCOME)
+                err_txt = get_setting("error_feedback_text", DEFAULT_ERROR)
+                fj_text = get_setting("force_join_text", DEFAULT_FJ_TEXT)
+                btn_text = get_setting("verify_button_text", DEFAULT_VERIFY_BTN)
+                poster = get_setting("force_join_poster", DEFAULT_POSTER)
+  
