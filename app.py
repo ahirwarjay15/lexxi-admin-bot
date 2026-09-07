@@ -230,24 +230,14 @@ def run_verify_process(chat_id, user_id, code, fj_mid):
         if anim_mid:
             tg_call("deleteMessage", {"chat_id": chat_id, "message_id": anim_mid})
 
-    # Strictly execute actions after animation message deletion
+    # Strictly exelseecute actions after animation message deletion
     if not unjoined:
         tg_call("deleteMessage", {"chat_id": chat_id, "message_id": fj_mid})
         deliver_file(chat_id, code)
     else:
+        tg_call("deleteMessage", {"chat_id": chat_id, "message_id": fj_mid})
         tg_call("sendMessage", {"chat_id": chat_id, "text": "❌ Please join all required channels first!"})
-        layout = int(get_setting("button_layout", "2"))
-        kb, row = [], []
-        for c in unjoined:
-            btn_txt = c.get('button_text', '').replace("↗", "").replace("↗️", "").strip()
-            row.append({"text": btn_txt, "url": c.get("join_url")})
-            if len(row) == layout:
-                kb.append(row)
-                row = []
-        if row:
-            kb.append(row)
-        kb.append([{"text": "» VERIFY", "callback_data": f"v:{code}"}])
-        tg_call("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": fj_mid, "reply_markup": {"inline_keyboard": kb}})
+        send_fj(chat_id, user_id, code, "")
 
 # --- Sub-Menu Display Functions ---
 def show_admin_home(chat_id, mid=None):
