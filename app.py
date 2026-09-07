@@ -155,7 +155,8 @@ def deliver_file(chat_id, code):
         return
 
     storage = get_setting("storage_channel_id", DEFAULT_STORAGE)
-    sender_mode = app_data.get("sender_mode", "copy")
+    sender_mode = "copy"
+
 
     if sender_mode == "forward":
         delivery = tg_call("forwardMessage", {"chat_id": chat_id, "from_chat_id": storage, "message_id": app_data["storage_message_id"]})
