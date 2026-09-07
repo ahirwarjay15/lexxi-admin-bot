@@ -220,7 +220,7 @@ def run_verify_process(chat_id, user_id, code, fj_mid):
             dots = [".", "..", "..."]
             idx = 1
             while not stop_event.is_set():
-                time.sleep(0.50)
+                time.sleep(0.25)
                 if stop_event.is_set():
                     break
                 tg_call("editMessageText", {
