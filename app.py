@@ -366,7 +366,6 @@ def webhook():
                         "title": sess["t"],
                         "deep_link_code": sess["c"],
                         "storage_message_id": sess["fid"],
-                        "sender_mode": mode,
                         "active": True
                     }, on_conflict="deep_link_code").execute()
                     tg_call("sendMessage", {"chat_id": cid, "text": f"Success\nLink: https://t.me/LexxiAdminBot?start={sess['c']}"})
