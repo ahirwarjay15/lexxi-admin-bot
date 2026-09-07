@@ -68,7 +68,7 @@ def set_setting(key, value):
 def get_channels():
     if supabase:
         try:
-            r = supabase.table("force_join_channels").select("*").order("slot").execute()
+            r = supabase.table("force_join_channels").select("*").execute()
             if r.data:
                 return r.data
         except Exception:
