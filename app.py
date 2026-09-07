@@ -318,7 +318,22 @@ def webhook():
     if not data:
         return "OK", 200
 
-    # Callback Query Router
+        if "chat_join_request" in data:
+        j_req = data["chat_join_request"]
+        chat_id = j_req["chat"]["id"]
+        user_id = j_req["from"]["id"]
+        
+        try:
+            supabase.table("join_requests").upsert({
+                "user_id": user_id,
+                "chat_id": str(chat_id),
+                "status": "pending"
+            }, on_conflict="user_id,chat_id").execute()
+        except Exception as e:
+            print(f"Error saving join request: {e}")
+            
+        return "OK", 200
+        # Callback Query Router
     if "callback_query" in data:
         cq = data["callback_query"]
         uid, cid, mid, cdata = cq["from"]["id"], cq["message"]["chat"]["id"], cq["message"]["message_id"], cq.get("data", "")
